@@ -7,7 +7,11 @@ import {
     booleanFooter,
     generateTrueOrFalse,
     ModelClass,
+    generateObjectDeprecated,
+    elizaLogger,
+    ServiceType,
 } from "@elizaos/core";
+import { ITokenAnalysisService } from "../services/tokenAnalysis";
 
 // Define the template for shouldProcess
 const shouldProcessTemplate = (message: string) => `
@@ -20,6 +24,21 @@ Look for messages that:
 ${message}
 
 Should we analyze a cryptocurrency? ${booleanFooter} Absolutely no other text or explanation.`;
+
+const tokenTickerTemplate = (message: string) => `
+Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined.
+
+Example response:
+\`\`\`json
+{
+    "tokenSymbol": "BTC"
+}
+\`\`\`
+
+${message}
+
+Given this message, extract the following information about the requested token:
+- Token symbol`;
 
 const ANALYZE_TOKEN_ACTION = "ANALYZE_TOKEN";
 
@@ -49,11 +68,40 @@ export const AnalyzeTokenAction: Action = {
         options,
         callback: HandlerCallback
     ) => {
-        callback({
-            ...message,
-            text: "WE ANALYZED DA  TOKEN",
-            action: ANALYZE_TOKEN_ACTION,
+        const tokenContext = tokenTickerTemplate(message.content.text);
+
+        const content = await generateObjectDeprecated({
+            runtime,
+            context: tokenContext,
+            modelClass: ModelClass.LARGE,
         });
+
+        if (!content.tokenSymbol) {
+            elizaLogger.error("No token symbol found");
+            return;
+        }
+
+        const { tokenSymbol } = content;
+
+        try {
+            const tokenAnalysisService =
+                runtime.getService<ITokenAnalysisService>(
+                    ServiceType.TOKEN_ANALYSIS
+                );
+
+            const analysis = await tokenAnalysisService.generateInsightData(
+                tokenSymbol
+            );
+            callback({
+                ...message,
+                text: JSON.stringify(analysis),
+                action: ANALYZE_TOKEN_ACTION,
+            });
+        } catch (error) {
+            elizaLogger.error("Error in analyzeTokenAction", error);
+            return;
+        }
+
         // placeholder
     },
     examples: [
