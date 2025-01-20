@@ -38,4 +38,12 @@ class TokenAnalysisService extends Service {
             throw new Error("Missing required API keys");
         }
     }
+
+    public async generateInsightData(
+        symbol: string
+    ): Promise<InsightData | string> {
+        return "fake stuff";
+    }
 }
+
+export default TokenAnalysisService.getInstance();
