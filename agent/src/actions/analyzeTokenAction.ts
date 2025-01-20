@@ -10,8 +10,11 @@ import {
     generateObjectDeprecated,
     elizaLogger,
     ServiceType,
+    composeContext,
+    generateText,
 } from "@elizaos/core";
 import { ITokenAnalysisService } from "../services/tokenAnalysis";
+import { cryptoAnalystTemplate } from "./cryptoAnalystPrompt";
 
 // Define the template for shouldProcess
 const shouldProcessTemplate = (message: string) => `
@@ -92,9 +95,31 @@ export const AnalyzeTokenAction: Action = {
             const analysis = await tokenAnalysisService.generateInsightData(
                 tokenSymbol
             );
+
+            if (typeof analysis === "string") {
+                elizaLogger.error(analysis);
+                return;
+            }
+
+            const context = composeContext({
+                state: {
+                    ...state,
+                    insightDataSchema:
+                        tokenAnalysisService.getInsightDataSchema(),
+                    analysisData: JSON.stringify(analysis),
+                },
+                template: cryptoAnalystTemplate,
+            });
+
+            const response = await generateText({
+                runtime,
+                context,
+                modelClass: ModelClass.LARGE,
+            });
+
             callback({
                 ...message,
-                text: JSON.stringify(analysis),
+                text: response,
                 action: ANALYZE_TOKEN_ACTION,
             });
         } catch (error) {
