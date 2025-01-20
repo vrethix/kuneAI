@@ -5,6 +5,8 @@ import {
     Memory,
     HandlerCallback,
     booleanFooter,
+    generateTrueOrFalse,
+    ModelClass,
 } from "@elizaos/core";
 
 // Define the template for shouldProcess
@@ -31,8 +33,12 @@ export const AnalyzeTokenAction: Action = {
     description: "Analyzes a crypto token and provides insights and data",
     validate: async (runtime: IAgentRuntime, message: Memory, state: State) => {
         const context = shouldProcessTemplate(message.content.text);
-        // placeholder
-        return true;
+        const shouldProcess = await generateTrueOrFalse({
+            runtime,
+            context,
+            modelClass: ModelClass.MEDIUM,
+        });
+        return shouldProcess;
     },
     handler: async (
         runtime: IAgentRuntime,
