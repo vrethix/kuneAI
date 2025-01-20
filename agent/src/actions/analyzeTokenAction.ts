@@ -21,8 +21,10 @@ ${message}
 
 Should we analyze a cryptocurrency? ${booleanFooter} Absolutely no other text or explanation.`;
 
+const ANALYZE_TOKEN_ACTION = "ANALYZE_TOKEN";
+
 export const AnalyzeTokenAction: Action = {
-    name: "ANALYZE_TOKEN",
+    name: ANALYZE_TOKEN_ACTION,
     similes: [
         "STUDY_TOKEN",
         "ANALYZE_COIN",
@@ -47,6 +49,11 @@ export const AnalyzeTokenAction: Action = {
         options,
         callback: HandlerCallback
     ) => {
+        callback({
+            ...message,
+            text: "WE ANALYZED DA  TOKEN",
+            action: ANALYZE_TOKEN_ACTION,
+        });
         // placeholder
     },
     examples: [
