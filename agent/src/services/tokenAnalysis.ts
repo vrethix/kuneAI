@@ -2,10 +2,7 @@ import { IAgentRuntime } from "@elizaos/core";
 import { Service, ServiceType } from "@elizaos/core";
 import { baseUrls, COINGECKO_API_KEY, GOLD_RUSH_API_KEY } from "./constants";
 
-export type ITokenAnalysisService = Service & {
-    generateInsightData(symbol: string): Promise<InsightData | string>;
-    getInsightDataSchema(): string;
-};
+export type ITokenAnalysisService = TokenAnalysisService & Service;
 
 export type InsightData = {
     chain: string;

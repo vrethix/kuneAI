@@ -282,7 +282,7 @@ export class DirectClient {
                 });
 
                 const response = await generateMessageResponse({
-                    runtime: runtime,
+                    runtime,
                     context,
                     modelClass: ModelClass.LARGE,
                 });
