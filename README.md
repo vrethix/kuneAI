@@ -1,3 +1,20 @@
+This fork showcases how to use Actions and Services to create an AIXBT-like AI bot.
+
+Relevant code is in files:
+
+`agent/src/services/*`
+`agent/src/actions/*`
+`agent/src/index.ts`
+`packages/core/src/types.ts`
+
+To run :
+```
+pnpm install
+pnpm start --character="./characters/eternalai.character.json"
+```
+
+Make sure you edit the character.json file to use Anthropic.
+
 # Eliza 🤖
 
 <div align="center">
