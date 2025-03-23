@@ -7,7 +7,16 @@
         "skipLibCheck": true,
         "forceConsistentCasingInFileNames": true,
         "allowImportingTsExtensions": true,
-        "noEmit": true
+        "noEmit": true,
+        "baseUrl": ".",
+        "paths": {
+            "@elizaos/*": [
+                "packages/*"
+            ],
+            "agent/*": [
+                "agent/*"
+            ]
+        }
     },
     "files": [],
     "references": [
@@ -17,5 +26,9 @@
         {
             "path": "packages/client-slack"
         }
+    ],
+    "include": [
+        "packages/**/*",
+        "agent/**/*"
     ]
 }

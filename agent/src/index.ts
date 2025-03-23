@@ -33,6 +33,8 @@ import {
     settings,
     stringToUuid,
     validateCharacterConfig,
+    ServiceType,
+    Agent,
 } from "@elizaos/core";
 import { zgPlugin } from "@elizaos/plugin-0g";
 
@@ -102,11 +104,25 @@ import net from "net";
 import path from "path";
 import { fileURLToPath } from "url";
 import yargs from "yargs";
+import TokenAnalysisService from './services/tokenAnalysis';
 import { AnalyzeTokenAction } from "./actions/analyzeTokenAction";
-import TokenAnalysisService from "./services/tokenAnalysis";
+import { GetTrendingTopicsAction } from "./actions/getTrendingTopicsAction";
+import { GenerateTweetAction } from "./actions/generateTweetAction";
+import { ravenCharacter } from "./mainCharacter";
+import dotenv from 'dotenv';
+import OpenAI from 'openai';
 
 const __filename = fileURLToPath(import.meta.url); // get the resolved path to the file
 const __dirname = path.dirname(__filename); // get the name of the directory
+
+// Load environment variables
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+
+process.on('uncaughtException', (error) => {
+    console.error('Uncaught Exception:', error);
+    console.error(error.stack);
+    process.exit(1);
+});
 
 export const wait = (minTime: number = 1000, maxTime: number = 3000) => {
     const waitTime =
@@ -483,70 +499,26 @@ export function getTokenForProvider(
     }
 }
 
-function initializeDatabase(dataDir: string) {
-    if (process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY) {
-        elizaLogger.info("Initializing Supabase connection...");
-        const db = new SupabaseDatabaseAdapter(
-            process.env.SUPABASE_URL,
-            process.env.SUPABASE_ANON_KEY
-        );
+function initializeDatabase(dataDir: string): IDatabaseAdapter & IDatabaseCacheAdapter {
+    // Check for Supabase configuration first
+    if (process.env.SUPABASE_URL && process.env.SUPABASE_KEY) {
+        elizaLogger.info('Initializing Supabase database adapter');
+        try {
+            return new SupabaseDatabaseAdapter(
+                process.env.SUPABASE_URL,
+                process.env.SUPABASE_KEY
+            ) as IDatabaseAdapter & IDatabaseCacheAdapter;
+        } catch (error) {
+            elizaLogger.error('Failed to initialize Supabase adapter:', error);
+            throw error;
+        }
+    }
 
-        // Test the connection
-        db.init()
-            .then(() => {
-                elizaLogger.success(
-                    "Successfully connected to Supabase database"
-                );
-            })
-            .catch((error) => {
-                elizaLogger.error("Failed to connect to Supabase:", error);
-            });
-
-        return db;
-    } else if (process.env.POSTGRES_URL) {
-        elizaLogger.info("Initializing PostgreSQL connection...");
-        const db = new PostgresDatabaseAdapter({
-            connectionString: process.env.POSTGRES_URL,
-            parseInputs: true,
-        });
-
-        // Test the connection
-        db.init()
-            .then(() => {
-                elizaLogger.success(
-                    "Successfully connected to PostgreSQL database"
-                );
-            })
-            .catch((error) => {
-                elizaLogger.error("Failed to connect to PostgreSQL:", error);
-            });
-
-        return db;
-    } else if (process.env.PGLITE_DATA_DIR) {
-        elizaLogger.info("Initializing PgLite adapter...");
-        // `dataDir: memory://` for in memory pg
-        const db = new PGLiteDatabaseAdapter({
-            dataDir: process.env.PGLITE_DATA_DIR,
-        });
-        return db;
+    // Fallback to other database adapters...
+    if (process.env.DATABASE_URL) {
+        return new PostgresDatabaseAdapter(process.env.DATABASE_URL);
     } else {
-        const filePath =
-            process.env.SQLITE_FILE ?? path.resolve(dataDir, "db.sqlite");
-        elizaLogger.info(`Initializing SQLite database at ${filePath}...`);
-        const db = new SqliteDatabaseAdapter(new Database(filePath));
-
-        // Test the connection
-        db.init()
-            .then(() => {
-                elizaLogger.success(
-                    "Successfully connected to SQLite database"
-                );
-            })
-            .catch((error) => {
-                elizaLogger.error("Failed to connect to SQLite:", error);
-            });
-
-        return db;
+        return new SQLiteDatabaseAdapter(path.join(dataDir, 'database.sqlite'));
     }
 }
 
@@ -736,7 +708,6 @@ export async function createAgent(
         modelProvider: character.modelProvider,
         evaluators: [],
         character,
-        // character.plugins are handled when clients are added
         plugins: [
             bootstrapPlugin,
             getSecret(character, "CONFLUX_CORE_PRIVATE_KEY")
@@ -884,8 +855,8 @@ export async function createAgent(
             getSecret(character, "QUAI_PRIVATE_KEY") ? quaiPlugin : null,
         ].filter(Boolean),
         providers: [],
-        actions: [AnalyzeTokenAction],
-        services: [TokenAnalysisService],
+        actions: [GenerateTweetAction],
+        services: [],
         managers: [],
         cacheManager: cache,
         fetch: logFetch,
@@ -969,6 +940,14 @@ async function startAgent(
     directClient: DirectClient
 ): Promise<AgentRuntime> {
     let db: IDatabaseAdapter & IDatabaseCacheAdapter;
+
+    // Add validation for required environment variables
+    if (process.env.SUPABASE_URL && process.env.SUPABASE_KEY) {
+        elizaLogger.info('Using Supabase as database backend');
+    } else {
+        elizaLogger.warn('Supabase credentials not found, falling back to alternative database');
+    }
+
     try {
         character.id ??= stringToUuid(character.name);
         character.username ??= character.name;
@@ -998,16 +977,19 @@ async function startAgent(
             token
         );
 
-        // start services/plugins/process knowledge
+        // Register services and actions
+        await initialize(runtime);
+
+        // Initialize all services, plugins, and process knowledge
         await runtime.initialize();
 
-        // start assigned clients
+        // Start assigned clients
         runtime.clients = await initializeClients(character, runtime);
 
-        // add to container
+        // Add to container
         directClient.registerAgent(runtime);
 
-        // report to console
+        // Report to console
         elizaLogger.debug(`Started ${character.name} as ${runtime.agentId}`);
 
         return runtime;
@@ -1044,53 +1026,178 @@ const checkPortAvailable = (port: number): Promise<boolean> => {
 };
 
 const startAgents = async () => {
-    const directClient = new DirectClient();
-    let serverPort = parseInt(settings.SERVER_PORT || "3000");
-    const args = parseArguments();
-    let charactersArg = args.characters || args.character;
-    let characters = [defaultCharacter];
-
-    if (charactersArg) {
-        characters = await loadCharacters(charactersArg);
-    }
-
     try {
+        const directClient = new DirectClient();
+        let serverPort = parseInt(settings.SERVER_PORT || "3000");
+        const args = parseArguments();
+        let charactersArg = args.characters || args.character;
+
+        console.log('Loading characters from:', charactersArg); // Debug log
+
+        let characters = [defaultCharacter];
+        if (charactersArg) {
+            characters = await loadCharacters(charactersArg);
+        }
+
+        console.log('Loaded characters:', characters.map(c => c.name)); // Debug log
+
         for (const character of characters) {
+            console.log('Starting agent for character:', character.name); // Debug log
             await startAgent(character, directClient);
         }
-    } catch (error) {
-        elizaLogger.error("Error starting agents:", error);
-    }
 
-    // Find available port
-    while (!(await checkPortAvailable(serverPort))) {
-        elizaLogger.warn(
-            `Port ${serverPort} is in use, trying ${serverPort + 1}`
+        // Find available port
+        while (!(await checkPortAvailable(serverPort))) {
+            elizaLogger.warn(
+                `Port ${serverPort} is in use, trying ${serverPort + 1}`
+            );
+            serverPort++;
+        }
+
+        // upload some agent functionality into directClient
+        directClient.startAgent = async (character) => {
+            // Handle plugins
+            character.plugins = await handlePluginImporting(character.plugins);
+
+            // wrap it so we don't have to inject directClient later
+            return startAgent(character, directClient);
+        };
+
+        directClient.start(serverPort);
+
+        if (serverPort !== parseInt(settings.SERVER_PORT || "3000")) {
+            elizaLogger.log(`Server started on alternate port ${serverPort}`);
+        }
+
+        elizaLogger.log(
+            "Run `pnpm start:client` to start the client and visit the outputted URL (http://localhost:5173) to chat with your agents. When running multiple agents, use client with different port `SERVER_PORT=3001 pnpm start:client`"
         );
-        serverPort++;
+    } catch (error) {
+        console.error('Detailed error in startAgents:');
+        console.error(error);
+        if (error.stack) console.error(error.stack);
+        process.exit(1);
     }
-
-    // upload some agent functionality into directClient
-    directClient.startAgent = async (character) => {
-        // Handle plugins
-        character.plugins = await handlePluginImporting(character.plugins);
-
-        // wrap it so we don't have to inject directClient later
-        return startAgent(character, directClient);
-    };
-
-    directClient.start(serverPort);
-
-    if (serverPort !== parseInt(settings.SERVER_PORT || "3000")) {
-        elizaLogger.log(`Server started on alternate port ${serverPort}`);
-    }
-
-    elizaLogger.log(
-        "Run `pnpm start:client` to start the client and visit the outputted URL (http://localhost:5173) to chat with your agents. When running multiple agents, use client with different port `SERVER_PORT=3001 pnpm start:client`"
-    );
 };
 
 startAgents().catch((error) => {
     elizaLogger.error("Unhandled error in startAgents:", error);
     process.exit(1);
 });
+
+export async function initialize(runtime: AgentRuntime) {
+    try {
+        // Check for required environment variables
+        if (!process.env.LUNAR_API_KEY) {
+            elizaLogger.error('Missing LUNAR_API_KEY environment variable');
+            throw new Error('LUNAR_API_KEY is required');
+        }
+
+        if (!process.env.OPENAI_API_KEY) {
+            elizaLogger.error('Missing OPENAI_API_KEY environment variable');
+            throw new Error('OPENAI_API_KEY is required');
+        }
+
+        // Initialize OpenAI client with error handling
+        const openai = new OpenAI({
+            apiKey: process.env.OPENAI_API_KEY
+        });
+
+        // Initialize TokenAnalysisService with better error handling
+        try {
+            if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
+                throw new Error('Missing required Supabase credentials');
+            }
+
+            elizaLogger.info('Initializing TokenAnalysisService with credentials:', {
+                hasLunarKey: !!process.env.LUNAR_API_KEY,
+                hasSupabaseUrl: !!process.env.SUPABASE_URL,
+                hasSupabaseKey: !!process.env.SUPABASE_KEY
+            });
+
+            const tokenService = new TokenAnalysisService({
+                apiKey: process.env.LUNAR_API_KEY!,
+                openai,
+                character: runtime.character,
+                supabaseUrl: process.env.SUPABASE_URL,
+                supabaseKey: process.env.SUPABASE_KEY
+            });
+
+            // Test Supabase connection before registering
+            await tokenService.testConnection();
+
+            // Register the service before initializing runtime
+            await runtime.registerService(tokenService);
+            elizaLogger.info('TokenAnalysisService registered successfully');
+        } catch (serviceError) {
+            elizaLogger.error('Failed to initialize TokenAnalysisService:', {
+                error: serviceError instanceof Error ? serviceError.message : 'Unknown error',
+                stack: serviceError instanceof Error ? serviceError.stack : undefined
+            });
+            throw serviceError;
+        }
+
+        // Register action before initializing runtime
+        runtime.registerAction(GenerateTweetAction);
+        elizaLogger.info('Actions registered successfully');
+
+        return runtime;
+    } catch (error) {
+        elizaLogger.error("Failed to initialize:", error);
+        throw error;
+    }
+}
+
+interface Config {
+    tokenAnalysis: {
+        apiKey: string;
+        supabaseUrl?: string;
+        supabaseKey?: string;
+    };
+    openai: any; // Replace with actual type
+    character: any; // Replace with actual type
+}
+
+export class KuneAgent extends AgentRuntime {
+    private tokenAnalysis: TokenAnalysisService;
+
+    constructor(config: Config) {
+        super({
+            character: config.character,
+            databaseAdapter: null,
+            token: "",
+            modelProvider: config.character.modelProvider,
+            cacheManager: null,
+        });
+
+        this.tokenAnalysis = new TokenAnalysisService({
+            apiKey: config.tokenAnalysis.apiKey,
+            openai: config.openai,
+            character: config.character,
+            supabaseUrl: config.tokenAnalysis.supabaseUrl,
+            supabaseKey: config.tokenAnalysis.supabaseKey
+        });
+    }
+
+    async generateTweet(): Promise<string> {
+        try {
+            const result = await this.tokenAnalysis.generateTweetContent();
+            return result.content;
+        } catch (error) {
+            elizaLogger.error('Error generating tweet:', error);
+            return 'My tweet generator is having an existential crisis. Back soon!';
+        }
+    }
+}
+
+export class Agent {
+    protected openai: any;
+    protected character: any;
+
+    constructor(config: any) {
+        this.openai = config.openai;
+        this.character = config.character;
+    }
+}
+
+export * from './services/tokenAnalysis';

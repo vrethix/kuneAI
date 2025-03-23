@@ -21,8 +21,9 @@ const shouldProcessTemplate = (message: string) => `
 # Task: Determine if the user is asking for an analysis of a cryptocurrency.
 
 Look for messages that:
-- Mention specific cryptocurrency tickers or names (e.g., BTC, ETH, SOL), or any words that combine analysis with an all caps word like DOGE
-- Contain words related to analysis, price, market data,token, coin, or investment
+- Mention specific cryptocurrency tickers or names (e.g., BTC, ETH, SOL)
+- Ask about market sentiment, social trends, or crypto analytics
+- Request information about token performance or social metrics
 
 ${message}
 
@@ -41,7 +42,7 @@ Example response:
 ${message}
 
 Given this message, extract the following information about the requested token:
-- Token symbol`;
+- Token symbol (in uppercase)`;
 
 const ANALYZE_TOKEN_ACTION = "ANALYZE_TOKEN";
 
@@ -50,11 +51,11 @@ export const AnalyzeTokenAction: Action = {
     similes: [
         "STUDY_TOKEN",
         "ANALYZE_COIN",
-        "ANALYZE_TOKEN",
         "ANALYZE_CRYPTO",
-        "MARKET_ANALYSIS_TOKEN",
+        "CHECK_CRYPTO_SENTIMENT",
+        "VIEW_TOKEN_METRICS",
     ],
-    description: "Analyzes a crypto token and provides insights and data",
+    description: "Analyzes a crypto token's market and social metrics using Lunar Crush data",
     validate: async (runtime: IAgentRuntime, message: Memory, state: State) => {
         const context = shouldProcessTemplate(message.content.text);
         const shouldProcess = await generateTrueOrFalse({
@@ -64,83 +65,52 @@ export const AnalyzeTokenAction: Action = {
         });
         return shouldProcess;
     },
-    handler: async (
-        runtime: IAgentRuntime,
-        message: Memory,
-        state: State,
-        options,
-        callback: HandlerCallback
-    ) => {
-        const tokenContext = tokenTickerTemplate(message.content.text);
-
-        const content = await generateObjectDeprecated({
-            runtime,
-            context: tokenContext,
-            modelClass: ModelClass.LARGE,
-        });
-
-        if (!content.tokenSymbol) {
-            elizaLogger.error("No token symbol found");
-            return;
-        }
-
+    handler: async (content: any, runtime: IAgentRuntime) => {
         const { tokenSymbol } = content;
 
         try {
-            const tokenAnalysisService =
-                runtime.getService<ITokenAnalysisService>(
-                    ServiceType.TOKEN_ANALYSIS
-                );
-
-            const analysis = await tokenAnalysisService.generateInsightData(
-                tokenSymbol
+            const tokenAnalysisService = runtime.getService<ITokenAnalysisService>(
+                ServiceType.TOKEN_ANALYSIS
             );
+
+            const analysis = await tokenAnalysisService.generateInsightData(tokenSymbol);
 
             if (typeof analysis === "string") {
                 elizaLogger.error(analysis);
                 return;
             }
 
-            const context = composeContext({
-                state: {
-                    ...state,
-                    insightDataSchema:
-                        tokenAnalysisService.getInsightDataSchema(),
-                    analysisData: JSON.stringify(analysis),
-                },
-                template: cryptoAnalystTemplate,
-            });
+            // Format the data for the agent to use
+            const { price, priceChange24h, marketCap } = analysis.metrics.market;
+            const { sentiment, galaxyScore } = analysis.metrics.social;
 
-            const response = await generateText({
-                runtime,
-                context,
-                modelClass: ModelClass.LARGE,
-            });
+            // Return the data for the agent to use in its response
+            return {
+                token: tokenSymbol,
+                price,
+                priceChange24h,
+                marketCap,
+                sentiment,
+                galaxyScore
+            };
 
-            callback({
-                ...message,
-                text: response,
-                action: ANALYZE_TOKEN_ACTION,
-            });
         } catch (error) {
-            elizaLogger.error("Error in analyzeTokenAction", error);
-            return;
+            elizaLogger.error("Error in AnalyzeTokenAction:", error);
+            return null;
         }
-
-        // placeholder
     },
     examples: [
         [
             {
                 user: "{{user1}}",
                 content: {
-                    text: "Can you analyze BTC for me?",
+                    text: "What's the social sentiment for BTC right now?",
                 },
             },
             {
                 user: "{{agentName}}",
                 content: {
-                    text: "Fetching analysis for BTC...",
+                    text: "Analyzing BTC's market and social metrics...",
                     action: "ANALYZE_TOKEN",
                 },
             },
@@ -149,13 +119,13 @@ export const AnalyzeTokenAction: Action = {
             {
                 user: "{{user1}}",
                 content: {
-                    text: "What's the latest data on ETH?",
+                    text: "How is ETH trending on social media?",
                 },
             },
             {
                 user: "{{agentName}}",
                 content: {
-                    text: "Retrieving analysis for ETH...",
+                    text: "Let me check ETH's social metrics and market data...",
                     action: "ANALYZE_TOKEN",
                 },
             },

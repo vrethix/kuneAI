@@ -3,9 +3,9 @@
     "compilerOptions": {
         "outDir": "dist",
         "rootDir": "src",
-        "moduleResolution": "Bundler",
-        "allowImportingTsExtensions": true,
-        "allowArbitraryExtensions": true
+        "types": [
+            "node"
+        ]
     },
     "include": [
         "src/**/*.ts"

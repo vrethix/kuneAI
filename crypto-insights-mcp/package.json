@@ -1,0 +1,28 @@
+{
+  "name": "crypto-insights-mcp",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node --loader ts-node/esm src/server.ts",
+    "dev": "node --loader ts-node/esm src/server.ts",
+    "build": "tsc"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "latest",
+    "@supabase/supabase-js": "latest",
+    "dotenv": "latest",
+    "node-fetch": "^3.3.2",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "ts-node": "latest",
+    "typescript": "latest",
+    "@types/node": "latest"
+  }
+}

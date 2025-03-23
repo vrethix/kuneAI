@@ -1579,3 +1579,30 @@ export enum ActionTimelineType {
     ForYou = "foryou",
     Following = "following",
 }
+
+// Token Analysis Types
+export interface TokenAnalysisData {
+    price: number;
+    percent_change_24h: number;
+    galaxy_score: number;
+    sentiment?: number;
+    social_volume?: number;
+    market_cap?: number;
+    volume_24h?: number;
+}
+
+export interface TokenInsightResponse {
+    data: TokenAnalysisData;
+    error?: string;
+}
+
+export interface ITokenAnalysisService extends Service {
+    supabase?: any;  // Supabase client instance
+    generateInsightData(symbol: string): Promise<TokenInsightResponse>;
+    fetchLunarCrush(symbol: string): Promise<any>;
+    generateCoinsList(): Promise<string[]>;
+    generateTopicInsight(topic: string): Promise<string>;
+    generateNewsInsight(news: any): Promise<string>;
+    generateTweetContent(): Promise<{ content: string; type: string }>;
+    generateCategoryData(category: string): Promise<any>;
+}

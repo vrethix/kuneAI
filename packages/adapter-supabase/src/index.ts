@@ -99,7 +99,24 @@ export class SupabaseDatabaseAdapter extends DatabaseAdapter {
 
     constructor(supabaseUrl: string, supabaseKey: string) {
         super();
-        this.supabase = createClient(supabaseUrl, supabaseKey);
+        if (!supabaseUrl || !supabaseKey) {
+            elizaLogger.error('Missing Supabase credentials');
+            throw new Error('Supabase URL and key are required');
+        }
+
+        try {
+            elizaLogger.info('Initializing Supabase client...');
+            this.supabase = createClient(supabaseUrl, supabaseKey, {
+                auth: {
+                    persistSession: false,
+                    autoRefreshToken: false
+                }
+            });
+            elizaLogger.info('Supabase client initialized successfully');
+        } catch (error) {
+            elizaLogger.error('Failed to initialize Supabase client:', error);
+            throw error;
+        }
     }
 
     async init() {
@@ -140,14 +157,64 @@ export class SupabaseDatabaseAdapter extends DatabaseAdapter {
     }
 
     async getAccountById(userId: UUID): Promise<Account | null> {
-        const { data, error } = await this.supabase
-            .from("accounts")
-            .select("*")
-            .eq("id", userId);
-        if (error) {
-            throw new Error(error.message);
+        try {
+            const { data, error } = await this.supabase
+                .from('accounts')
+                .select()
+                .eq('id', userId);
+
+            if (error) {
+                elizaLogger.error('Error fetching account:', error);
+                throw error;
+            }
+
+            // If account exists, return it
+            if (data && data.length > 0) {
+                return {
+                    id: data[0].id,
+                    name: data[0].name || 'KuneAI',
+                    username: data[0].username,
+                    email: data[0].email,
+                    details: data[0].details || {}
+                };
+            }
+
+            // For new accounts, try to create with incremental username if needed
+            const shortId = userId.split('-')[0];
+            let counter = 0;
+            let username = `kuneai_${shortId}`;
+            let created = false;
+
+            while (!created && counter < 10) {
+                const newAccount: Account = {
+                    id: userId,
+                    name: 'KuneAI',
+                    username: counter === 0 ? username : `${username}_${counter}`,
+                    email: `kuneai-${userId}@example.com`,
+                    details: {}
+                };
+
+                const { error: insertError } = await this.supabase
+                    .from('accounts')
+                    .insert([newAccount]);
+
+                if (!insertError) {
+                    return newAccount;
+                }
+
+                if (insertError.code === '23505') { // Unique constraint violation
+                    counter++;
+                    continue;
+                }
+
+                throw insertError;
+            }
+
+            throw new Error('Could not create account with unique username after 10 attempts');
+        } catch (error) {
+            elizaLogger.error('Error in getAccountById:', error);
+            throw error;
         }
-        return (data?.[0] as Account) || null;
     }
 
     async createAccount(account: Account): Promise<boolean> {
